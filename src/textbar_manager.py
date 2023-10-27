@@ -4,13 +4,17 @@ import math
 from abc import ABC, abstractmethod
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from pprint import pprint
 from typing import Any, Dict, List
 
 import pytz
 import requests
 
 
-# 4. UtilityCalculator (Base Class)
+DEBUG = False
+# DEBUG = True
+
+
 class UtilityCalculator(ABC):
     @abstractmethod
     def calculate(self, data: Any) -> Dict[str, str]:
@@ -95,68 +99,23 @@ class TextbarUpdater:
         self.manager.bulk_write_data(all_data)
 
 
-class TogglTagTimeCalculator(UtilityCalculator):
-    # TAGS_TO_ID = {
-    #     "1_1_time_bad_distraction": "14637787",
-    #     "1_2_time_med_distraction": "14637945",
-    #     "1_3_time_break": "14680995",
-    #     "1_4_time_tasks_or_chores": "14680996",
-    #     "1_5_scheduling_timeblocking": "14700153",
-    #     "1_6_time_work_planning": "14654293",
-    #     "1_7_time_work": "14637788",
-    # }
-    CRITERIA = {
-        "today_work": {
-            "start_days_ago": 0,
-            "tags": ["1_7_time_work"],
-        },
-        "today_wps": {
-            "start_days_ago": 0,
-            "tags": [
-                "1_6_time_work_planning",
-                "1_5_scheduling_timeblocking",
-                "1_7_time_work",
-            ],
-        },
-        "today_wpsc": {
-            "start_days_ago": 0,
-            "tags": [
-                "1_4_time_tasks_or_chores",
-                "1_6_time_work_planning",
-                "1_5_scheduling_timeblocking",
-                "1_7_time_work",
-            ],
-        },
-        "today_distraction": {
-            "start_days_ago": 0,
-            "tags": ["1_2_time_med_distraction"],
-        },
-        "today_opt": {
-            "start_days_ago": 0,
-            "tags": ["1_1_time_bad_distraction"],
-        },
-        "today_total_distraction": {
-            "start_days_ago": 0,
-            "tags": [
-                "1_1_time_bad_distraction",
-                "1_2_time_med_distraction",
-            ],
-        },
-        "today_breaks": {
-            "start_days_ago": 0,
-            "tags": [
-                "1_3_time_break",
-            ],
-        },
-    }
+class TogglBaseTimeCalculator(UtilityCalculator):
+    @classmethod
+    @abstractmethod
+    def CRITERIA(cls) -> dict[str, Any]:
+        ...
+
+    @abstractmethod
+    def fits_criteria(self, entry: dict[str, Any], criteria: Any) -> bool:
+        ...
 
     def calculate(self, data: List[Dict[str, Any]]) -> Dict[str, str]:
-        results = {utility: 0 for utility in self.CRITERIA.keys()}
+        results = {utility: 0 for utility in self.CRITERIA().keys()}
         for entry in data:
             if entry["server_deleted_at"]:
                 continue
-            for utility, criteria in self.CRITERIA.items():
-                if any(tag in entry["tags"] for tag in criteria["tags"]):
+            for utility, criteria in self.CRITERIA().items():
+                if self.fits_criteria(entry, criteria):
                     if entry["stop"]:
                         results[utility] += entry["duration"]
                     else:
@@ -177,10 +136,97 @@ class TogglTagTimeCalculator(UtilityCalculator):
         return result_strs
 
 
+class TogglProjectTimeCalculator(TogglBaseTimeCalculator):
+    @classmethod
+    def CRITERIA(cls) -> dict[str, dict[str, list[int]]]:
+        return {
+            "today_work": {
+                "project_ids": [
+                    187316243,
+                    192815981,
+                    195792173,
+                    192815956,
+                    189390036,
+                    186181594,
+                ],
+            },
+        }
+
+    def fits_criteria(self, entry: dict[str, Any], criteria: Any) -> bool:
+        if DEBUG:
+            pprint(entry)
+        try:
+            project_id = int(entry["project_id"])
+        except ValueError:
+            project_id = None
+        return project_id in criteria["project_ids"]
+
+
+class TogglTagTimeCalculator(TogglBaseTimeCalculator):
+    # TAGS_TO_ID = {
+    #     "1_1_time_bad_distraction": "14637787",
+    #     "1_2_time_med_distraction": "14637945",
+    #     "1_3_time_break": "14680995",
+    #     "1_4_time_tasks_or_chores": "14680996",
+    #     "1_5_scheduling_timeblocking": "14700153",
+    #     "1_6_time_work_planning": "14654293",
+    #     "1_7_time_work": "14637788",
+    # }
+    @classmethod
+    def CRITERIA(cls) -> dict[str, Any]:
+        return {
+            "today_work": {
+                "start_days_ago": 0,
+                "tags": ["1_7_time_work"],
+            },
+            "today_wps": {
+                "start_days_ago": 0,
+                "tags": [
+                    "1_6_time_work_planning",
+                    "1_5_scheduling_timeblocking",
+                    "1_7_time_work",
+                ],
+            },
+            "today_wpsc": {
+                "start_days_ago": 0,
+                "tags": [
+                    "1_4_time_tasks_or_chores",
+                    "1_6_time_work_planning",
+                    "1_5_scheduling_timeblocking",
+                    "1_7_time_work",
+                ],
+            },
+            "today_distraction": {
+                "start_days_ago": 0,
+                "tags": ["1_2_time_med_distraction"],
+            },
+            "today_opt": {
+                "start_days_ago": 0,
+                "tags": ["1_1_time_bad_distraction"],
+            },
+            "today_total_distraction": {
+                "start_days_ago": 0,
+                "tags": [
+                    "1_1_time_bad_distraction",
+                    "1_2_time_med_distraction",
+                ],
+            },
+            "today_breaks": {
+                "start_days_ago": 0,
+                "tags": [
+                    "1_3_time_break",
+                ],
+            },
+        }
+
+    def fits_criteria(self, entry: dict[str, Any], criteria: dict[str, Any]) -> bool:
+        return any(tag in entry["tags"] for tag in criteria["tags"])
+
+
 class TogglUpdater(DatasourceUpdater):
     def _fetch_data(self) -> list[dict[str, Any]]:
-        API_KEY = os.environ.get("TOGGL_API_KEY")
-        if not API_KEY:
+        api_key = os.environ.get("TOGGL_API_KEY")
+        if not api_key:
             raise ValueError("No Toggl API key found.")
 
         # Get the current date and time in the Eastern timezone
@@ -197,7 +243,7 @@ class TogglUpdater(DatasourceUpdater):
         url = f"https://api.track.toggl.com/api/v9/me/time_entries?since={start_timestamp}"
 
         headers = {"Content-Type": "application/json"}
-        auth: tuple[str, str] = (API_KEY, "api_token")
+        auth: tuple[str, str] = (api_key, "api_token")
         response = requests.get(url, headers=headers, auth=auth)
 
         if not response.ok:
@@ -205,15 +251,25 @@ class TogglUpdater(DatasourceUpdater):
                 f"Error fetching data from Toggl. Status code: {response.status_code}. Response: {response.text}"
             )
 
-        return response.json()
+        entries = response.json()
+        valid_entries = []
+        # validate entries
+        for entry in entries:
+            entry_start_time = datetime.fromisoformat(entry["start"])
+            if entry_start_time < start_time:
+                continue
+            valid_entries.append(entry)
+        if DEBUG:
+            pprint(valid_entries)
+        return valid_entries
 
 
 async def update_all():
     print("starting update all")
     textbar_manager = TextbarManager()
     print(f"Current data: {textbar_manager.read_all_data()}")
-    tag_calculator = TogglTagTimeCalculator()
-    toggl_updater = TogglUpdater([tag_calculator])
+    project_calculator = TogglProjectTimeCalculator()
+    toggl_updater = TogglUpdater([project_calculator])
     textbar_updater = TextbarUpdater([toggl_updater], textbar_manager)
     await textbar_updater.update_all()
     print(f"Finished update. New data: {textbar_manager.read_all_data()}")
