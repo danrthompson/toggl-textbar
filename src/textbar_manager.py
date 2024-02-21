@@ -10,9 +10,11 @@ from typing import Any, Dict, List
 import pytz
 import requests
 
+from project_client_utils import fetch_projects, create_pid_list
 
-DEBUG = False
-# DEBUG = True
+
+# DEBUG = False
+DEBUG = True
 
 
 class UtilityCalculator(ABC):
@@ -100,21 +102,18 @@ class TextbarUpdater:
 
 
 class TogglBaseTimeCalculator(UtilityCalculator):
-    @classmethod
     @abstractmethod
-    def CRITERIA(cls) -> dict[str, Any]:
-        ...
+    def criteria(self) -> dict[str, Any]: ...
 
     @abstractmethod
-    def fits_criteria(self, entry: dict[str, Any], criteria: Any) -> bool:
-        ...
+    def fits_criteria(self, entry: dict[str, Any], criteria: Any) -> bool: ...
 
     def calculate(self, data: List[Dict[str, Any]]) -> Dict[str, str]:
-        results = {utility: 0 for utility in self.CRITERIA().keys()}
+        results = {utility: 0 for utility in self.criteria().keys()}
         for entry in data:
             if entry["server_deleted_at"]:
                 continue
-            for utility, criteria in self.CRITERIA().items():
+            for utility, criteria in self.criteria().items():
                 if self.fits_criteria(entry, criteria):
                     if entry["stop"]:
                         results[utility] += entry["duration"]
@@ -137,8 +136,7 @@ class TogglBaseTimeCalculator(UtilityCalculator):
 
 
 class TogglProjectTimeCalculator(TogglBaseTimeCalculator):
-    @classmethod
-    def CRITERIA(cls) -> dict[str, dict[str, list[int]]]:
+    def criteria(self) -> dict[str, dict[str, list[int]]]:
         return {
             "today_work": {
                 "project_ids": [
@@ -148,7 +146,30 @@ class TogglProjectTimeCalculator(TogglBaseTimeCalculator):
                     192815956,
                     189390036,
                     186181594,
+                    198396908,
                 ],
+            },
+        }
+
+    def fits_criteria(self, entry: dict[str, Any], criteria: Any) -> bool:
+        if DEBUG:
+            pprint(entry)
+        try:
+            project_id = int(entry["project_id"])
+        except ValueError:
+            project_id = None
+        return project_id in criteria["project_ids"]
+
+
+class TogglClientTimeCalculator(TogglBaseTimeCalculator):
+    ACCEPTABLE_CLIENT_IDS = [61372545]
+
+    def criteria(self) -> dict[str, dict[str, list[int]]]:
+        projects = fetch_projects()
+        project_list = create_pid_list(projects, self.ACCEPTABLE_CLIENT_IDS)
+        return {
+            "today_work": {
+                "project_ids": project_list,
             },
         }
 
@@ -172,8 +193,7 @@ class TogglTagTimeCalculator(TogglBaseTimeCalculator):
     #     "1_6_time_work_planning": "14654293",
     #     "1_7_time_work": "14637788",
     # }
-    @classmethod
-    def CRITERIA(cls) -> dict[str, Any]:
+    def criteria(self) -> dict[str, Any]:
         return {
             "today_work": {
                 "start_days_ago": 0,
@@ -268,7 +288,7 @@ async def update_all():
     print("starting update all")
     textbar_manager = TextbarManager()
     print(f"Current data: {textbar_manager.read_all_data()}")
-    project_calculator = TogglProjectTimeCalculator()
+    project_calculator = TogglClientTimeCalculator()
     toggl_updater = TogglUpdater([project_calculator])
     textbar_updater = TextbarUpdater([toggl_updater], textbar_manager)
     await textbar_updater.update_all()
